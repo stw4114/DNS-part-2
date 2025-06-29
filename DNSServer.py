@@ -124,8 +124,8 @@ def run_dns_server():
                     rrset.add(rdata)
                     response.answer.append(rrset)
 
+                # ✅ Decrypt **ONCE** if TXT
                 if qtype == dns.rdatatype.TXT:
-                    # TXT is tuple, unpack first
                     token_str = answer_data[0]
                     print(f"Responding to: {qname}")
                     print(f"Original TXT record: {token_str}")
@@ -133,7 +133,7 @@ def run_dns_server():
                         decrypted = decrypt_with_aes(token_str, password, salt)
                         print("Decrypted TXT:", decrypted)
                     except Exception as e:
-                        print("decrypt error!", type(e), "Value:", e)
+                        print("decrypt error! Type:", type(e), "Value:", e)
 
             response.flags |= 1 << 10
             server_socket.sendto(response.to_wire(), addr)
