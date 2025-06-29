@@ -1,11 +1,10 @@
 import dns.message
 import dns.rdatatype
 import dns.rdataclass
-import dns.rdtypes
-import dns.rdtypes.ANY
 from dns.rdtypes.ANY.MX import MX
 from dns.rdtypes.ANY.SOA import SOA
 import dns.rdata
+import dns.rrset
 import socket
 import threading
 import signal
@@ -18,7 +17,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
 
-# === KEY GEN ===
+
+# === === === === === #
+# === CRYPTO SECTION === #
+# === === === === === #
+
 def generate_aes_key(password, salt):
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -30,14 +33,12 @@ def generate_aes_key(password, salt):
     key = base64.urlsafe_b64encode(key)
     return key
 
-# === ENCRYPT ===
 def encrypt_with_aes(input_string, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
     encrypted_data = f.encrypt(input_string.encode('utf-8'))
     return encrypted_data
 
-# === DECRYPT ===
 def decrypt_with_aes(encrypted_data, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
@@ -46,15 +47,22 @@ def decrypt_with_aes(encrypted_data, password, salt):
     decrypted_data = f.decrypt(encrypted_data)
     return decrypted_data.decode('utf-8')
 
-# === PARAMETERS ===
+
+# === === === === === #
+# === CONFIG === #
+# === === === === === #
+
 salt = b'Tandon'
 password = 'stw4114@nyu.edu'
 input_string = "AlwaysWatching"
 
-# Encrypt once
+# Encrypt once for DNS storage
 encrypted_value = encrypt_with_aes(input_string, password, salt)
 
-# === DNS RECORDS ===
+# === === === === === #
+# === DNS RECORDS === #
+# === === === === === #
+
 dns_records = {
     'example.com.': {
         dns.rdatatype.A: '192.168.1.101',
@@ -79,6 +87,10 @@ dns_records = {
         dns.rdatatype.NS: 'ns1.nyu.edu.',
     },
 }
+
+# === === === === === #
+# === DNS SERVER === #
+# === === === === === #
 
 def run_dns_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -113,23 +125,24 @@ def run_dns_server():
                     response.answer.append(rrset)
 
                 if qtype == dns.rdatatype.TXT:
-                    # Demonstrate decrypt
+                    # TXT is tuple, unpack first
+                    token_str = answer_data[0]
+                    print(f"Responding to: {qname}")
+                    print(f"Original TXT record: {token_str}")
                     try:
-                        print("Responding to:", qname)
-                        print("Original:", answer_data)
-                        decrypted = decrypt_with_aes(answer_data, password, salt)
-                        print("Decrypted:", decrypted)
+                        decrypted = decrypt_with_aes(token_str, password, salt)
+                        print("Decrypted TXT:", decrypted)
                     except Exception as e:
                         print("decrypt error!", type(e), "Value:", e)
 
             response.flags |= 1 << 10
-
             server_socket.sendto(response.to_wire(), addr)
 
         except KeyboardInterrupt:
-            print('\nExiting...')
+            print("\nExiting...")
             server_socket.close()
             sys.exit(0)
+
 
 def run_dns_server_user():
     print("Input 'q' and hit 'enter' to quit")
