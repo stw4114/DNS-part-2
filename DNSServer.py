@@ -1,8 +1,6 @@
 import dns.message
 import dns.rdatatype
 import dns.rdataclass
-import dns.rdtypes
-import dns.rdtypes.ANY
 from dns.rdtypes.ANY.MX import MX
 from dns.rdtypes.ANY.SOA import SOA
 import dns.rdata
@@ -46,10 +44,9 @@ salt = b'Tandon'
 password = 'stw4114@nyu.edu'
 input_string = 'AlwaysWatching'
 
-# Encrypt once
 encrypted_value = encrypt_with_aes(input_string, password, salt)
+decrypted_value = decrypt_with_aes(encrypted_value, password, salt)
 
-# For future use    
 def generate_sha256_hash(input_string):
     sha256_hash = hashlib.sha256()
     sha256_hash.update(input_string.encode('utf-8'))
@@ -88,7 +85,7 @@ dns_records = {
     },
     'nyu.edu.': {
         dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_value.decode(),),  # TXT must be str, decode ONCE here
+        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),
         dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
         dns.rdatatype.NS: 'ns1.nyu.edu.',
@@ -125,9 +122,21 @@ def run_dns_server():
                     rdata_list.append(rdata)
                 else:
                     if isinstance(answer_data, str):
-                        rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, answer_data)]
+                        if qtype == dns.rdatatype.TXT:
+                            rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, f'"{answer_data}"')]
+                        else:
+                            rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, answer_data)]
                     else:
-                        rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, data) for data in answer_data]
+                        if qtype == dns.rdatatype.TXT:
+                            rdata_list = [
+                                dns.rdata.from_text(dns.rdataclass.IN, qtype, f'"{data}"')
+                                for data in answer_data
+                            ]
+                        else:
+                            rdata_list = [
+                                dns.rdata.from_text(dns.rdataclass.IN, qtype, data)
+                                for data in answer_data
+                            ]
 
                 rrset = dns.rrset.RRset(question.name, dns.rdataclass.IN, qtype)
                 for rdata in rdata_list:
