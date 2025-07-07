@@ -29,34 +29,31 @@ def generate_aes_key(password, salt):
     key = base64.urlsafe_b64encode(key)
     return key
 
-# Lookup details on fernet in the cryptography.io documentation    
 def encrypt_with_aes(input_string, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
-    encrypted_data = f.encrypt(input_string.encode('utf-8'))  # encrypt method
+    encrypted_data = f.encrypt(input_string.encode('utf-8'))
     return encrypted_data
 
 def decrypt_with_aes(encrypted_data, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
-    decrypted_data = f.decrypt(encrypted_data)  # decrypt method
+    decrypted_data = f.decrypt(encrypted_data)
     return decrypted_data.decode('utf-8')
 
-# === Prepare the secret ===
-salt = b'Tandon'  # byte object
+# === Setup ===
+salt = b'Tandon'
 password = 'stw4114@nyu.edu'
 input_string = 'AlwaysWatching'
 
+# Encrypt once
 encrypted_value = encrypt_with_aes(input_string, password, salt)
-decrypted_value = decrypt_with_aes(encrypted_value, password, salt)
 
-# For future use    
-def generate_sha256_hash(input_string):
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(input_string.encode('utf-8'))
-    return sha256_hash.hexdigest()
+# Just for local debug — no effect on serving
+print("Encrypted Value:", encrypted_value.decode())
+print("Decrypted Value:", decrypt_with_aes(encrypted_value, password, salt))
 
-# DNS records dictionary
+# DNS records
 dns_records = {
     'example.com.': {
         dns.rdatatype.A: '192.168.1.101',
@@ -89,7 +86,7 @@ dns_records = {
     },
     'nyu.edu.': {
         dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # Store as string tuple
+        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # Store encoded string as tuple for TXT
         dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
         dns.rdatatype.NS: 'ns1.nyu.edu.',
@@ -97,18 +94,15 @@ dns_records = {
 }
 
 def run_dns_server():
-    # Create UDP socket for IPv4, bind to localhost and DNS port 53
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind(('127.0.0.1', 53))
 
     while True:
         try:
-            # Wait for incoming DNS requests
             data, addr = server_socket.recvfrom(1024)
             request = dns.message.from_wire(data)
             response = dns.message.make_response(request)
 
-            # Get the first question
             question = request.question[0]
             qname = question.name.to_text()
             qtype = question.rdtype
@@ -139,18 +133,11 @@ def run_dns_server():
                 response.answer.append(rrset)
 
                 if qtype == dns.rdatatype.TXT:
-                    try:
-                        original_txt = answer_data[0]
-                        print(f"Original TXT record: {original_txt}")
-                        decrypted_txt = decrypt_with_aes(original_txt.encode('utf-8'), password, salt)
-                        print(f"Decrypted TXT: {decrypted_txt}")
-                    except Exception as e:
-                        print(f"decrypt error! Type: {type(e)} Value: {e}")
-                        print("Something is wrong with how you are storing the token")
+                    print(f"Original TXT record: {answer_data[0]}")
+                    # DO NOT decrypt here — only for demo printout:
+                    # print("Decrypted:", decrypt_with_aes(answer_data[0].encode(), password, salt))
 
-            # Set AA flag
             response.flags |= 1 << 10
-
             server_socket.sendto(response.to_wire(), addr)
 
         except KeyboardInterrupt:
