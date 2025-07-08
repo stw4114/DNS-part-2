@@ -1,4 +1,3 @@
-
 import dns.message
 import dns.rdatatype
 import dns.rdataclass
@@ -17,6 +16,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
 
+# === === === CRYPTO === === ===
+
 def generate_aes_key(password, salt):
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -24,38 +25,44 @@ def generate_aes_key(password, salt):
         salt=salt,
         length=32
     )
-    key = kdf.derive(password.encode('utf-8'))
-    key = base64.urlsafe_b64encode(key)
-    return key
+    return base64.urlsafe_b64encode(kdf.derive(password.encode('utf-8')))
 
 def encrypt_with_aes(input_string, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
-    encrypted_data = f.encrypt(input_string.encode('utf-8'))
-    return encrypted_data
+    return f.encrypt(input_string.encode('utf-8'))
 
 def decrypt_with_aes(encrypted_data, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
     if isinstance(encrypted_data, str):
-        encrypted_data = encrypted_data.encode('ascii')  # FIX: Fernet expects ascii for urlsafe base64
-    decrypted_data = f.decrypt(encrypted_data)
-    return decrypted_data.decode('utf-8')
+        encrypted_data = encrypted_data.encode('ascii')
+    decrypted = f.decrypt(encrypted_data)
+    return decrypted.decode('utf-8')
 
-# === Prepare the secret ===
+# === === === PREPARE === === ===
+
 salt = b'Tandon'
 password = 'stw4114@nyu.edu'
 input_string = 'AlwaysWatching'
 
+# Encrypt → decode to string → store that
 encrypted_value = encrypt_with_aes(input_string, password, salt)
-decrypted_value = decrypt_with_aes(encrypted_value, password, salt)
+encrypted_string = encrypted_value.decode('utf-8')  # ✅ Type-cast to string!
+
+# Test decrypt works
+decrypted_value = decrypt_with_aes(encrypted_string, password, salt)
+
+print(f"Encrypted: {encrypted_string}")
+print(f"Decrypted: {decrypted_value}")
 
 def generate_sha256_hash(input_string):
     sha256_hash = hashlib.sha256()
     sha256_hash.update(input_string.encode('utf-8'))
     return sha256_hash.hexdigest()
 
-# DNS records dictionary
+# === === === DNS RECORDS === === ===
+
 dns_records = {
     'example.com.': {
         dns.rdatatype.A: '192.168.1.101',
@@ -88,12 +95,14 @@ dns_records = {
     },
     'nyu.edu.': {
         dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # store as string
+        dns.rdatatype.TXT: (encrypted_string,),   # ✅ Type-cast version
         dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
         dns.rdatatype.NS: 'ns1.nyu.edu.',
     },
 }
+
+# === === === SERVER === === ===
 
 def run_dns_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -120,9 +129,8 @@ def run_dns_server():
                         rdata_list.append(MX(dns.rdataclass.IN, dns.rdatatype.MX, pref, server))
                 elif qtype == dns.rdatatype.SOA:
                     mname, rname, serial, refresh, retry, expire, minimum = answer_data
-                    rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA,
-                                mname, rname, serial, refresh, retry, expire, minimum)
-                    rdata_list.append(rdata)
+                    rdata_list.append(SOA(dns.rdataclass.IN, dns.rdatatype.SOA,
+                                          mname, rname, serial, refresh, retry, expire, minimum))
                 else:
                     if isinstance(answer_data, str):
                         if qtype == dns.rdatatype.TXT:
@@ -149,7 +157,7 @@ def run_dns_server():
                 if qtype == dns.rdatatype.TXT:
                     try:
                         original_txt = answer_data[0]
-                        print(f"Original TXT record: {original_txt}")
+                        print(f"Original TXT record: {original_txt!r}")
                         decrypted_txt = decrypt_with_aes(original_txt, password, salt)
                         print(f"Decrypted TXT: {decrypted_txt}")
                     except Exception as e:
