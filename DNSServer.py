@@ -1,3 +1,4 @@
+
 import dns.message
 import dns.rdatatype
 import dns.rdataclass
@@ -16,8 +17,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
 
-# === CRYPTO ===
-
 def generate_aes_key(password, salt):
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -26,23 +25,24 @@ def generate_aes_key(password, salt):
         length=32
     )
     key = kdf.derive(password.encode('utf-8'))
-    return base64.urlsafe_b64encode(key)
+    key = base64.urlsafe_b64encode(key)
+    return key
 
 def encrypt_with_aes(input_string, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
-    return f.encrypt(input_string.encode('utf-8'))
+    encrypted_data = f.encrypt(input_string.encode('utf-8'))
+    return encrypted_data
 
 def decrypt_with_aes(encrypted_data, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
     if isinstance(encrypted_data, str):
-        encrypted_data = encrypted_data.encode('ascii')  # Fernet expects ascii-safe base64
-    decrypted = f.decrypt(encrypted_data)
-    return decrypted.decode('utf-8')
+        encrypted_data = encrypted_data.encode('ascii')  # FIX: Fernet expects ascii for urlsafe base64
+    decrypted_data = f.decrypt(encrypted_data)
+    return decrypted_data.decode('utf-8')
 
-# === Setup ===
-
+# === Prepare the secret ===
 salt = b'Tandon'
 password = 'stw4114@nyu.edu'
 input_string = 'AlwaysWatching'
@@ -50,16 +50,12 @@ input_string = 'AlwaysWatching'
 encrypted_value = encrypt_with_aes(input_string, password, salt)
 decrypted_value = decrypt_with_aes(encrypted_value, password, salt)
 
-print(f"Encrypted value: {encrypted_value.decode('ascii')}")
-print(f"Decrypted value: {decrypted_value}")
-
 def generate_sha256_hash(input_string):
     sha256_hash = hashlib.sha256()
     sha256_hash.update(input_string.encode('utf-8'))
     return sha256_hash.hexdigest()
 
-# === DNS records ===
-
+# DNS records dictionary
 dns_records = {
     'example.com.': {
         dns.rdatatype.A: '192.168.1.101',
@@ -92,14 +88,12 @@ dns_records = {
     },
     'nyu.edu.': {
         dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_value.decode('ascii'),),  # store as plain string
+        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # store as string
         dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
         dns.rdatatype.NS: 'ns1.nyu.edu.',
     },
 }
-
-# === DNS server ===
 
 def run_dns_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -126,8 +120,9 @@ def run_dns_server():
                         rdata_list.append(MX(dns.rdataclass.IN, dns.rdatatype.MX, pref, server))
                 elif qtype == dns.rdatatype.SOA:
                     mname, rname, serial, refresh, retry, expire, minimum = answer_data
-                    rdata_list.append(SOA(dns.rdataclass.IN, dns.rdatatype.SOA,
-                                          mname, rname, serial, refresh, retry, expire, minimum))
+                    rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA,
+                                mname, rname, serial, refresh, retry, expire, minimum)
+                    rdata_list.append(rdata)
                 else:
                     if isinstance(answer_data, str):
                         if qtype == dns.rdatatype.TXT:
@@ -151,21 +146,17 @@ def run_dns_server():
                     rrset.add(rdata)
                 response.answer.append(rrset)
 
-                # Only decrypt and print for TXT:
                 if qtype == dns.rdatatype.TXT:
                     try:
                         original_txt = answer_data[0]
-                        # If there's accidental quotes, strip:
-                        if original_txt.startswith('"') and original_txt.endswith('"'):
-                            original_txt = original_txt[1:-1]
-                        print(f"Original TXT record: {original_txt!r}")
+                        print(f"Original TXT record: {original_txt}")
                         decrypted_txt = decrypt_with_aes(original_txt, password, salt)
                         print(f"Decrypted TXT: {decrypted_txt}")
                     except Exception as e:
                         print(f"decrypt error! Type: {type(e)} Value: {e}")
                         print("Something is wrong with how you are storing the token")
 
-            response.flags |= 1 << 10  # AA flag
+            response.flags |= 1 << 10
             server_socket.sendto(response.to_wire(), addr)
 
         except KeyboardInterrupt:
