@@ -5,9 +5,6 @@ from dns.rdtypes.ANY.MX import MX
 from dns.rdtypes.ANY.SOA import SOA
 import dns.rdata
 import socket
-import threading
-import signal
-import os
 import sys
 
 import hashlib
@@ -37,49 +34,22 @@ def decrypt_with_aes(encrypted_data, password, salt):
     f = Fernet(key)
     if isinstance(encrypted_data, str):
         encrypted_data = encrypted_data.encode('ascii')
-    decrypted = f.decrypt(encrypted_data)
-    return decrypted.decode('utf-8')
+    return f.decrypt(encrypted_data).decode('utf-8')
 
-# === === === PREPARE === === ===
+# === === === PREP === === ===
 
 salt = b'Tandon'
 password = 'stw4114@nyu.edu'
 input_string = 'AlwaysWatching'
 
-# Encrypt → decode to string → store that
 encrypted_value = encrypt_with_aes(input_string, password, salt)
-encrypted_string = encrypted_value.decode('utf-8')  # ✅ Type-cast to string!
-
-# Test decrypt works
-decrypted_value = decrypt_with_aes(encrypted_string, password, salt)
-
-print(f"Encrypted: {encrypted_string}")
-print(f"Decrypted: {decrypted_value}")
-
-def generate_sha256_hash(input_string):
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(input_string.encode('utf-8'))
-    return sha256_hash.hexdigest()
+encrypted_string = encrypted_value.decode('utf-8')
 
 # === === === DNS RECORDS === === ===
 
 dns_records = {
     'example.com.': {
         dns.rdatatype.A: '192.168.1.101',
-        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0370:7334',
-        dns.rdatatype.MX: [(10, 'mail.example.com.')],
-        dns.rdatatype.CNAME: 'www.example.com.',
-        dns.rdatatype.NS: 'ns.example.com.',
-        dns.rdatatype.TXT: ('This is a TXT record',),
-        dns.rdatatype.SOA: (
-            'ns1.example.com.',
-            'admin.example.com.',
-            2023081401,
-            3600,
-            1800,
-            604800,
-            86400,
-        ),
     },
     'safebank.com.': {
         dns.rdatatype.A: '192.168.1.102',
@@ -95,7 +65,7 @@ dns_records = {
     },
     'nyu.edu.': {
         dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_string,),   # ✅ Type-cast version
+        dns.rdatatype.TXT: (encrypted_string,),  # ✅ CAST TO STRING!
         dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
         dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
         dns.rdatatype.NS: 'ns1.nyu.edu.',
@@ -104,9 +74,13 @@ dns_records = {
 
 # === === === SERVER === === ===
 
+DNS_PORT = 5353  # ✅ high non-privileged port!
+
 def run_dns_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.bind(('127.0.0.1', 53))
+    server_socket.bind(('127.0.0.1', DNS_PORT))
+
+    print(f"DNS server running on 127.0.0.1:{DNS_PORT} ...")
 
     while True:
         try:
@@ -154,16 +128,6 @@ def run_dns_server():
                     rrset.add(rdata)
                 response.answer.append(rrset)
 
-                if qtype == dns.rdatatype.TXT:
-                    try:
-                        original_txt = answer_data[0]
-                        print(f"Original TXT record: {original_txt!r}")
-                        decrypted_txt = decrypt_with_aes(original_txt, password, salt)
-                        print(f"Decrypted TXT: {decrypted_txt}")
-                    except Exception as e:
-                        print(f"decrypt error! Type: {type(e)} Value: {e}")
-                        print("Something is wrong with how you are storing the token")
-
             response.flags |= 1 << 10
             server_socket.sendto(response.to_wire(), addr)
 
@@ -172,21 +136,5 @@ def run_dns_server():
             server_socket.close()
             sys.exit(0)
 
-def run_dns_server_user():
-    print("Input 'q' and hit 'enter' to quit")
-    print("DNS server is running on 127.0.0.1:53 ...")
-
-    def user_input():
-        while True:
-            cmd = input()
-            if cmd.lower() == 'q':
-                print('Quitting...')
-                os.kill(os.getpid(), signal.SIGINT)
-
-    input_thread = threading.Thread(target=user_input)
-    input_thread.daemon = True
-    input_thread.start()
-    run_dns_server()
-
 if __name__ == '__main__':
-    run_dns_server_user()
+    run_dns_server()
