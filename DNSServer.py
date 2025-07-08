@@ -40,7 +40,7 @@ def decrypt_with_aes(enc_data, password, salt):
 # -------------------------------
 
 salt = b'Tandon'
-password = "your_netid@nyu.edu"   # <<<< REPLACE with your NYU email
+password = "stw4114d@nyu.edu"  
 secret_data = "AlwaysWatching"
 
 encrypted_data = encrypt_with_aes(secret_data, password, salt)
