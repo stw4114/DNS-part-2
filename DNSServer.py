@@ -1,181 +1,134 @@
-import dns.message
-import dns.rdatatype
-import dns.rdataclass
-from dns.rdtypes.ANY.MX import MX
-from dns.rdtypes.ANY.SOA import SOA
-import dns.rdata
 import socket
 import threading
-import signal
-import os
-import sys
+import dns.message
+import dns.flags
+import dns.rrset
+import dns.rdatatype
+import dns.rdataclass
 
-import hashlib
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Util.Padding import pad, unpad
 import base64
 
+# -------------------------------
+# Encryption Helpers
+# -------------------------------
+
 def generate_aes_key(password, salt):
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        iterations=100000,
-        salt=salt,
-        length=32
-    )
-    key = kdf.derive(password.encode('utf-8'))
-    key = base64.urlsafe_b64encode(key)
+    key = PBKDF2(password, salt, dkLen=32)
     return key
 
-def encrypt_with_aes(input_string, password, salt):
+def encrypt_with_aes(data, password, salt):
     key = generate_aes_key(password, salt)
-    f = Fernet(key)
-    encrypted_data = f.encrypt(input_string.encode('utf-8'))
-    return encrypted_data
+    cipher = AES.new(key, AES.MODE_CBC)
+    ct_bytes = cipher.encrypt(pad(data.encode(), AES.block_size))
+    iv = cipher.iv
+    return base64.b64encode(iv + ct_bytes).decode('utf-8')
 
-def decrypt_with_aes(encrypted_data, password, salt):
+def decrypt_with_aes(enc_data, password, salt):
+    enc = base64.b64decode(enc_data)
+    iv = enc[:16]
+    ct = enc[16:]
     key = generate_aes_key(password, salt)
-    f = Fernet(key)
-    decrypted_data = f.decrypt(encrypted_data)
-    return decrypted_data.decode('utf-8')
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    pt = unpad(cipher.decrypt(ct), AES.block_size)
+    return pt.decode('utf-8')
 
-# === Prepare the secret ===
+# -------------------------------
+# Prepare encryption parameters
+# -------------------------------
+
 salt = b'Tandon'
-password = 'stw4114@nyu.edu'
-input_string = 'AlwaysWatching'
+password = "your_netid@nyu.edu"   # <<<< REPLACE with your NYU email
+secret_data = "AlwaysWatching"
 
-encrypted_value = encrypt_with_aes(input_string, password, salt)
-decrypted_value = decrypt_with_aes(encrypted_value, password, salt)
+encrypted_data = encrypt_with_aes(secret_data, password, salt)
 
-def generate_sha256_hash(input_string):
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(input_string.encode('utf-8'))
-    return sha256_hash.hexdigest()
+# -------------------------------
+# DNS Records Dictionary
+# -------------------------------
 
-# DNS records dictionary
-dns_records = {
-    'example.com.': {
-        dns.rdatatype.A: '192.168.1.101',
-        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0370:7334',
-        dns.rdatatype.MX: [(10, 'mail.example.com.')],
-        dns.rdatatype.CNAME: 'www.example.com.',
-        dns.rdatatype.NS: 'ns.example.com.',
-        dns.rdatatype.TXT: ('This is a TXT record',),
-        dns.rdatatype.SOA: (
-            'ns1.example.com.',
-            'admin.example.com.',
-            2023081401,
-            3600,
-            1800,
-            604800,
-            86400,
-        ),
-    },
-    'safebank.com.': {
-        dns.rdatatype.A: '192.168.1.102',
-    },
-    'google.com.': {
-        dns.rdatatype.A: '192.168.1.103',
-    },
-    'legitsite.com.': {
-        dns.rdatatype.A: '192.168.1.104',
-    },
-    'yahoo.com.': {
-        dns.rdatatype.A: '192.168.1.105',
-    },
+records = {
+    'example.com.': {'A': '1.2.3.4'},
+
+    'safebank.com.': {'A': '192.168.1.102'},
+    'google.com.': {'A': '192.168.1.103'},
+    'legitsite.com.': {'A': '192.168.1.104'},
+    'yahoo.com.': {'A': '192.168.1.105'},
     'nyu.edu.': {
-        dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),
-        dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
-        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
-        dns.rdatatype.NS: 'ns1.nyu.edu.',
-    },
+        'A': '192.168.1.106',
+        'TXT': encrypted_data,
+        'MX': (10, 'mxa-00256a01.gslb.pphosted.com.'),
+        'AAAA': '2001:db8:85a3::8a2e:373:7312',
+        'NS': 'ns1.nyu.edu.'
+    }
 }
 
-def run_dns_server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.bind(('127.0.0.1', 53))
+# -------------------------------
+# DNS Server Logic
+# -------------------------------
 
+def handle_client(sock):
     while True:
         try:
-            data, addr = server_socket.recvfrom(1024)
+            data, addr = sock.recvfrom(512)
             request = dns.message.from_wire(data)
             response = dns.message.make_response(request)
 
             question = request.question[0]
             qname = question.name.to_text()
-            qtype = question.rdtype
+            qtype = dns.rdatatype.to_text(question.rdtype)
 
-            print(f"Responding to request: {qname}")
+            print(f"Received query for: {qname} type: {qtype}")
 
-            if qname in dns_records and qtype in dns_records[qname]:
-                answer_data = dns_records[qname][qtype]
-                rdata_list = []
+            if qname in records and qtype in records[qname]:
+                rrset = None
+                if qtype == 'A':
+                    rrset = dns.rrset.from_text(qname, 300, dns.rdataclass.IN, dns.rdatatype.A, records[qname]['A'])
+                elif qtype == 'TXT':
+                    rrset = dns.rrset.from_text(qname, 300, dns.rdataclass.IN, dns.rdatatype.TXT, f'"{records[qname]["TXT"]}"')
+                elif qtype == 'MX':
+                    priority, exchange = records[qname]['MX']
+                    rrset = dns.rrset.from_text(qname, 300, dns.rdataclass.IN, dns.rdatatype.MX, f"{priority} {exchange}")
+                elif qtype == 'AAAA':
+                    rrset = dns.rrset.from_text(qname, 300, dns.rdataclass.IN, dns.rdatatype.AAAA, records[qname]['AAAA'])
+                elif qtype == 'NS':
+                    rrset = dns.rrset.from_text(qname, 300, dns.rdataclass.IN, dns.rdatatype.NS, records[qname]['NS'])
 
-                if qtype == dns.rdatatype.MX:
-                    for pref, server in answer_data:
-                        rdata_list.append(MX(dns.rdataclass.IN, dns.rdatatype.MX, pref, server))
-                elif qtype == dns.rdatatype.SOA:
-                    mname, rname, serial, refresh, retry, expire, minimum = answer_data
-                    rdata = SOA(dns.rdataclass.IN, dns.rdatatype.SOA,
-                                mname, rname, serial, refresh, retry, expire, minimum)
-                    rdata_list.append(rdata)
-                else:
-                    if isinstance(answer_data, str):
-                        if qtype == dns.rdatatype.TXT:
-                            rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, f'"{answer_data}"')]
-                        else:
-                            rdata_list = [dns.rdata.from_text(dns.rdataclass.IN, qtype, answer_data)]
-                    else:
-                        if qtype == dns.rdatatype.TXT:
-                            rdata_list = [
-                                dns.rdata.from_text(dns.rdataclass.IN, qtype, f'"{data}"')
-                                for data in answer_data
-                            ]
-                        else:
-                            rdata_list = [
-                                dns.rdata.from_text(dns.rdataclass.IN, qtype, data)
-                                for data in answer_data
-                            ]
+                if rrset:
+                    response.answer.append(rrset)
+                    response.flags |= dns.flags.AA  # Authoritative answer flag
+            else:
+                response.set_rcode(dns.rcode.NXDOMAIN)
 
-                rrset = dns.rrset.RRset(question.name, dns.rdataclass.IN, qtype)
-                for rdata in rdata_list:
-                    rrset.add(rdata)
-                response.answer.append(rrset)
-
-                if qtype == dns.rdatatype.TXT:
-                    try:
-                        original_txt = answer_data[0]
-                        print(f"Original TXT record: {original_txt}")
-                        decrypted_txt = decrypt_with_aes(original_txt.encode(), password, salt)
-                        print(f"Decrypted TXT: {decrypted_txt}")
-                    except Exception as e:
-                        print(f"decrypt error! Type: {type(e)} Value: {e}")
-                        print("Something is wrong with how you are storing the token")
-
-            response.flags |= 1 << 10
-            server_socket.sendto(response.to_wire(), addr)
-
+            sock.sendto(response.to_wire(), addr)
         except KeyboardInterrupt:
-            print('\nExiting...')
-            server_socket.close()
-            sys.exit(0)
+            print("\nShutting down server.")
+            break
+        except Exception as e:
+            print(f"Error handling request: {e}")
 
-def run_dns_server_user():
-    print("Input 'q' and hit 'enter' to quit")
-    print("DNS server is running on 127.0.0.1:53 ...")
+# -------------------------------
+# Run the Server
+# -------------------------------
 
-    def user_input():
+def main():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('0.0.0.0', 53))  # Bind to all interfaces on port 53
+    print("DNS server running on UDP port 53... (Press Ctrl+C to stop)")
+
+    server_thread = threading.Thread(target=handle_client, args=(sock,))
+    server_thread.start()
+
+    try:
         while True:
             cmd = input()
-            if cmd.lower() == 'q':
-                print('Quitting...')
-                os.kill(os.getpid(), signal.SIGINT)
+            if cmd.strip().lower() == 'q':
+                print("Shutting down.")
+                break
+    except KeyboardInterrupt:
+        print("Exiting...")
 
-    input_thread = threading.Thread(target=user_input)
-    input_thread.daemon = True
-    input_thread.start()
-    run_dns_server()
-
-if __name__ == '__main__':
-    run_dns_server_user()
+if __name__ == "__main__":
+    main()
