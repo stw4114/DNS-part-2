@@ -37,7 +37,7 @@ def decrypt_with_aes(encrypted_data, password, salt):
     key = generate_aes_key(password, salt)
     f = Fernet(key)
     if isinstance(encrypted_data, str):
-        encrypted_data = encrypted_data.encode('ascii')  # FIX: Fernet expects ascii for urlsafe base64
+        encrypted_data = encrypted_data.encode('utf-8')  # ✅ FIX: ensure proper base64 bytes
     decrypted_data = f.decrypt(encrypted_data)
     return decrypted_data.decode('utf-8')
 
@@ -87,12 +87,12 @@ dns_records = {
         dns.rdatatype.A: '192.168.1.105',
     },
     'nyu.edu.': {
-    dns.rdatatype.A: '192.168.1.106',
-    dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # Correct string-cast
-    dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
-    dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
-    dns.rdatatype.NS: 'ns1.nyu.edu.',
-},
+        dns.rdatatype.A: '192.168.1.106',
+        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # ✅ Correct: store as string
+        dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
+        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
+        dns.rdatatype.NS: 'ns1.nyu.edu.',
+    },
 }
 
 def run_dns_server():
@@ -150,7 +150,7 @@ def run_dns_server():
                     try:
                         original_txt = answer_data[0]
                         print(f"Original TXT record: {original_txt}")
-                        decrypted_txt = decrypt_with_aes(original_txt, password, salt)
+                        decrypted_txt = decrypt_with_aes(original_txt, password, salt)  # ✅ automatically encodes str
                         print(f"Decrypted TXT: {decrypted_txt}")
                     except Exception as e:
                         print(f"decrypt error! Type: {type(e)} Value: {e}")
