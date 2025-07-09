@@ -87,12 +87,12 @@ dns_records = {
         dns.rdatatype.A: '192.168.1.105',
     },
     'nyu.edu.': {
-        dns.rdatatype.A: '192.168.1.106',
-        dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # store as string
-        dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
-        dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
-        dns.rdatatype.NS: 'ns1.nyu.edu.',
-    },
+    dns.rdatatype.A: '192.168.1.106',
+    dns.rdatatype.TXT: (encrypted_value.decode('utf-8'),),  # Correct string-cast
+    dns.rdatatype.MX: [(10, 'mxa-00256a01.gslb.pphosted.com.')],
+    dns.rdatatype.AAAA: '2001:0db8:85a3:0000:0000:8a2e:0373:7312',
+    dns.rdatatype.NS: 'ns1.nyu.edu.',
+},
 }
 
 def run_dns_server():
